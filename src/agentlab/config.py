@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     rag_score_threshold: float = 0.30
     ingest_on_startup: bool = True
     corpus_dir: str = "data/corpus"
+    upload_dir: str = "data/uploads"
+    admin_token: str = ""
+    max_upload_bytes: int = 2 * 1024 * 1024
     demo_dir: str = "demo"
 
     max_message_chars: int = 2000

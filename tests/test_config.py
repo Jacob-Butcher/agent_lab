@@ -30,3 +30,10 @@ def test_defaults():
     assert s.embedding_dim == 1024
     assert s.rag_top_k == 5
     assert s.max_history_messages == 12
+
+
+def test_kb_defaults():
+    s = _settings()
+    assert s.upload_dir == "data/uploads"
+    assert s.admin_token == ""
+    assert s.max_upload_bytes == 2 * 1024 * 1024
