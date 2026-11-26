@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>知识库管理 · Agent Lab</title>
+<style>
+  :root { --bg:#0f1117; --panel:#171a23; --line:#2a2f3d; --text:#e6e9f0; --muted:#98a2b3; --accent:#4f8cff; --danger:#ff5d5d; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; background:var(--bg); color:var(--text); }
+  header { display:flex; justify-content:space-between; align-items:center; padding:16px 24px; border-bottom:1px solid var(--line); }
+  h1 { font-size:18px; margin:0; }
+  main { max-width:1000px; margin:0 auto; padding:24px; display:grid; gap:20px; }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px; }
+  h2 { font-size:14px; margin:0 0 12px; color:var(--muted); font-weight:600; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:6px; padding:7px 14px; cursor:pointer; font-size:13px; }
+  button.secondary { background:#2a2f3d; }
+  button.danger { background:var(--danger); }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  input, textarea { background:#0e1118; color:var(--text); border:1px solid var(--line); border-radius:6px; padding:8px; font-size:13px; }
+  textarea { width:100%; min-height:260px; resize:vertical; font-family:ui-monospace,Menlo,monospace; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:8px; border-bottom:1px solid var(--line); }
+  th { color:var(--muted); font-weight:500; }
+  .row-actions { display:flex; gap:6px; }
+  .badge { font-size:11px; padding:2px 8px; border-radius:999px; background:#2a2f3d; color:var(--muted); }
+  .badge.upload { background:#1f3a2d; color:#6ee7a0; }
+  .muted { color:var(--muted); font-size:12px; }
+  .drop { border:1px dashed var(--line); border-radius:8px; padding:18px; text-align:center; color:var(--muted); }
+  .drop.over { border-color:var(--accent); color:var(--accent); }
+  #toast { position:fixed; top:16px; right:16px; display:grid; gap:8px; z-index:50; }
+  .toast { background:#222838; border:1px solid var(--line); border-radius:8px; padding:10px 14px; font-size:13px; }
+  .toast.error { border-color:var(--danger); }
+  .score { font-family:ui-monospace,Menlo,monospace; color:#f5c451; }
+  .hidden { display:none; }
+  @media (max-width:700px) { main { padding:12px; } td:nth-child(2) { display:none; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>知识库管理</h1>
+  <button class="secondary" id="token-btn">设置 Token</button>
+</header>
+<main>
+  <section>
+    <h2>上传文档（.md，≤2MB）</h2>
+    <div class="drop" id="drop" tabindex="0" role="button" aria-label="上传 Markdown 文档">
+      拖拽文件到此处，或 <button type="button" class="secondary" id="pick-btn">点击选择</button>
+    </div>
+    <input type="file" id="file" accept=".md,text/markdown" hidden>
+  </section>
+  <section>
+    <h2>文档列表 <span class="muted" id="doc-count"></span></h2>
+    <table>
+      <thead><tr><th>doc_id</th><th>标题</th><th>chunks</th><th>来源</th><th>更新</th><th>操作</th></tr></thead>
+      <tbody id="docs"></tbody>
+    </table>
+    <p class="muted hidden" id="empty">暂无文档</p>
+  </section>
+  <section>
+    <h2>检索预览</h2>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <input id="q" aria-label="检索问题" placeholder="输入测试问题，如：退款多久到账" style="flex:1;min-width:220px">
+      <label class="muted">top_k <input id="topk" type="number" min="1" max="20" value="5" style="width:60px"></label>
+      <label class="muted">阈值 <input id="th" type="range" min="0" max="1" step="0.01" value="0.3" style="width:110px"><span id="thv" class="muted">0.30</span></label>
+      <button id="search-btn">检索</button>
+    </div>
+    <div id="results" style="margin-top:14px;display:grid;gap:10px"></div>
+  </section>
+  <section id="editor" class="hidden">
+    <h2>编辑 <span id="edit-title" class="muted"></span></h2>
+    <textarea id="edit-body" placeholder="正文（不含 frontmatter）"></textarea>
+    <div style="display:flex;gap:8px;margin-top:10px;align-items:center">
+      <button id="save-btn">保存并重建索引</button>
+      <button class="secondary" id="cancel-btn">取消</button>
+      <span class="muted" id="edit-source"></span>
+    </div>
+  </section>
+</main>
+<div id="toast"></div>
+<script>
+const TOKEN_KEY = "kb_admin_token";
+let editing = null;
+
+function toast(message, isError = false) {
+  const el = document.createElement("div");
+  el.className = "toast" + (isError ? " error" : "");
+  el.textContent = message;
+  document.getElementById("toast").appendChild(el);
+  setTimeout(() => el.remove(), 4000);
+}
+
+function token() { return sessionStorage.getItem(TOKEN_KEY) || ""; }
+
+async function api(path, options = {}) {
+  const headers = Object.assign({}, options.headers || {}, { "X-Admin-Token": token() });
+  const response = await fetch(path, Object.assign({}, options, { headers }));
+  if (response.status === 401) {
+    sessionStorage.removeItem(TOKEN_KEY);
+    promptToken("令牌无效，请重新输入");
+    throw new Error("unauthorized");
+  }
+  const text = await response.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch (_) { data = { detail: text }; }
+  if (!response.ok) {
+    const detail = data && data.detail ? (typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail)) : "HTTP " + response.status;
+    const error = new Error(detail);
+    error.status = response.status;
+    throw error;
+  }
+  return data;
+}
+
+function promptToken(message) {
+  const value = window.prompt(message || "请输入管理令牌 ADMIN_TOKEN", token());
+  if (value === null) return false;
+  const trimmed = value.trim();
+  if (!trimmed) { sessionStorage.removeItem(TOKEN_KEY); return false; }
+  sessionStorage.setItem(TOKEN_KEY, trimmed);
+  loadDocs();
+  return true;
+}
+
+function fmtTime(iso) {
+  if (!iso) return "—";
+  try { return new Date(iso).toLocaleString(); } catch (_) { return iso; }
+}
+
+async function loadDocs() {
+  try {
+    const data = await api("/api/kb/docs");
+    const tbody = document.getElementById("docs");
+    tbody.textContent = "";
+    document.getElementById("doc-count").textContent = "共 " + data.docs.length + " 篇";
+    document.getElementById("empty").classList.toggle("hidden", data.docs.length > 0);
+    for (const doc of data.docs) {
+      const tr = document.createElement("tr");
+      for (const value of [doc.doc_id, doc.title, String(doc.chunks)]) {
+        const td = document.createElement("td");
+        td.textContent = value;
+        tr.appendChild(td);
+      }
+      const sourceTd = document.createElement("td");
+      const badge = document.createElement("span");
+      badge.className = "badge" + (doc.source === "uploads" ? " upload" : "");
+      badge.textContent = doc.source === "uploads" ? "上传" : "内置";
+      sourceTd.appendChild(badge);
+      tr.appendChild(sourceTd);
+      const timeTd = document.createElement("td");
+      timeTd.className = "muted";
+      timeTd.textContent = fmtTime(doc.updated_at);
+      tr.appendChild(timeTd);
+      const actions = document.createElement("td");
+      actions.className = "row-actions";
+      const editBtn = document.createElement("button");
+      editBtn.className = "secondary";
+      editBtn.textContent = "查看/编辑";
+      editBtn.onclick = () => openEditor(doc.doc_id);
+      actions.appendChild(editBtn);
+      if (doc.source === "uploads") {
+        const delBtn = document.createElement("button");
+        delBtn.className = "danger";
+        delBtn.textContent = "删除";
+        delBtn.onclick = () => removeDoc(doc.doc_id);
+        actions.appendChild(delBtn);
+      }
+      tr.appendChild(actions);
+      tbody.appendChild(tr);
+    }
+  } catch (error) {
+    if (error.message !== "unauthorized") toast(error.message, true);
+  }
+}
+
+async function openEditor(docId) {
+  try {
+    const doc = await api("/api/kb/docs/" + encodeURIComponent(docId));
+    editing = docId;
+    document.getElementById("editor").classList.remove("hidden");
+    document.getElementById("edit-title").textContent = doc.doc_id + " · " + doc.title;
+    document.getElementById("edit-body").value = doc.body;
+    document.getElementById("edit-source").textContent = doc.source === "uploads" ? "来源：上传" : "来源：内置（保存后生成覆盖版本）";
+    document.getElementById("editor").scrollIntoView({ behavior: "smooth" });
+  } catch (error) {
+    if (error.message !== "unauthorized") toast(error.message, true);
+  }
+}
+
+async function saveEditor() {
+  if (!editing) return;
+  const button = document.getElementById("save-btn");
+  button.disabled = true;
+  try {
+    const body = document.getElementById("edit-body").value;
+    const result = await api("/api/kb/docs/" + encodeURIComponent(editing), {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body }),
+    });
+    toast("已保存 " + result.doc_id + "（" + result.chunks + " 个片段）");
+    closeEditor();
+    loadDocs();
+  } catch (error) {
+    if (error.message !== "unauthorized") toast(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function closeEditor() {
+  editing = null;
+  document.getElementById("editor").classList.add("hidden");
+}
+
+async function removeDoc(docId) {
+  if (!window.confirm("确定删除 " + docId + "？若存在内置版本会自动回退。")) return;
+  try {
+    const result = await api("/api/kb/docs/" + encodeURIComponent(docId), { method: "DELETE" });
+    toast(result.result === "reverted_to_builtin" ? "已删除覆盖，恢复为内置版本" : "已删除文档");
+    loadDocs();
+  } catch (error) {
+    if (error.message !== "unauthorized") toast(error.message, true);
+  }
+}
+
+async function uploadFile(file, overwrite) {
+  const form = new FormData();
+  form.append("file", file);
+  const url = "/api/kb/docs" + (overwrite ? "?overwrite=true" : "");
+  return api(url, { method: "POST", body: form });
+}
+
+async function handleFile(file) {
+  if (!file) return;
+  if (!file.name.toLowerCase().endsWith(".md")) { toast("仅支持 .md 文件", true); return; }
+  try {
+    const result = await uploadFile(file, false);
+    toast("已上传 " + result.doc_id);
+    loadDocs();
+  } catch (error) {
+    if (error.message === "unauthorized") return;
+    if (error.status === 409) {
+      if (window.confirm(error.message)) {
+        try {
+          const result = await uploadFile(file, true);
+          toast("已覆盖 " + result.doc_id);
+          loadDocs();
+        } catch (overwriteError) {
+          if (overwriteError.message !== "unauthorized") toast(overwriteError.message, true);
+        }
+      }
+    } else {
+      toast(error.message, true);
+    }
+  }
+}
+
+async function runSearch() {
+  const query = document.getElementById("q").value.trim();
+  if (!query) { toast("请输入问题", true); return; }
+  const topK = Number(document.getElementById("topk").value || 5);
+  const threshold = Number(document.getElementById("th").value || 0);
+  const box = document.getElementById("results");
+  box.textContent = "";
+  try {
+    const data = await api("/api/kb/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query, top_k: topK, threshold }),
+    });
+    if (!data.results.length) {
+      const empty = document.createElement("p");
+      empty.className = "muted";
+      empty.textContent = "没有命中的片段，试试降低阈值或换个问法";
+      box.appendChild(empty);
+      return;
+    }
+    for (const row of data.results) {
+      const card = document.createElement("div");
+      card.style.border = "1px solid var(--line)";
+      card.style.borderRadius = "8px";
+      card.style.padding = "10px";
+      const head = document.createElement("div");
+      const code = document.createElement("code");
+      code.textContent = row.doc_id + "#" + row.chunk_index;
+      head.appendChild(code);
+      const score = document.createElement("span");
+      score.className = "score";
+      score.textContent = "  " + Number(row.score).toFixed(3);
+      head.appendChild(score);
+      const meta = document.createElement("span");
+      meta.className = "muted";
+      meta.textContent = "  " + row.title + (row.heading ? " / " + row.heading : "");
+      head.appendChild(meta);
+      const content = document.createElement("p");
+      content.className = "muted";
+      content.textContent = row.content;
+      card.appendChild(head);
+      card.appendChild(content);
+      box.appendChild(card);
+    }
+  } catch (error) {
+    if (error.message !== "unauthorized") toast(error.message, true);
+  }
+}
+
+document.getElementById("token-btn").onclick = () => promptToken();
+document.getElementById("pick-btn").onclick = () => document.getElementById("file").click();
+document.getElementById("file").onchange = (event) => {
+  handleFile(event.target.files[0]);
+  event.target.value = "";
+};
+const drop = document.getElementById("drop");
+drop.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    document.getElementById("file").click();
+  }
+});
+drop.addEventListener("dragover", (event) => { event.preventDefault(); drop.classList.add("over"); });
+drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+drop.addEventListener("drop", (event) => {
+  event.preventDefault();
+  drop.classList.remove("over");
+  handleFile(event.dataTransfer.files[0]);
+});
+document.getElementById("search-btn").onclick = runSearch;
+document.getElementById("q").addEventListener("keydown", (event) => { if (event.key === "Enter") runSearch(); });
+document.getElementById("save-btn").onclick = saveEditor;
+document.getElementById("cancel-btn").onclick = closeEditor;
+document.getElementById("th").oninput = (event) => {
+  document.getElementById("thv").textContent = Number(event.target.value).toFixed(2);
+};
+if (token()) loadDocs(); else promptToken("请输入管理令牌 ADMIN_TOKEN");
+</script>
+</body>
+</html>

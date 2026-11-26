@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from agentlab.api.chat import create_router
@@ -51,6 +51,19 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         ok = await current.store.health() and await current.memory.health()
         return JSONResponse(
             {"status": "ready" if ok else "degraded"}, status_code=200 if ok else 503
+        )
+
+    admin_dir = Path(__file__).resolve().parents[2] / "static" / "admin"
+    admin_page = admin_dir / "kb.html"
+    if admin_page.is_file():
+
+        @app.get("/admin/kb")
+        async def kb_admin_page():
+            return FileResponse(admin_page)
+
+    if admin_dir.is_dir():
+        app.mount(
+            "/admin", StaticFiles(directory=str(admin_dir), html=True), name="admin"
         )
 
     demo_dir = Path(settings.demo_dir)

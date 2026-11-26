@@ -243,3 +243,28 @@ async def test_put_rejects_oversized_body(tmp_path):
         assert response.status_code == 413
     finally:
         await services.close()
+
+
+async def test_admin_page_served(tmp_path):
+    app, services = await _make_app(tmp_path)
+    try:
+        async with _client(app) as client:
+            response = await client.get("/admin/kb")
+        assert response.status_code == 200
+        assert "知识库管理" in response.text
+    finally:
+        await services.close()
+
+
+async def test_admin_static_paths(tmp_path):
+    app, services = await _make_app(tmp_path)
+    try:
+        async with _client(app) as client:
+            page = await client.get("/admin/kb")
+            assert page.headers["content-type"].startswith("text/html")
+            static = await client.get("/admin/kb.html")
+            assert static.status_code == 200
+            missing = await client.get("/admin/nope")
+            assert missing.status_code == 404
+    finally:
+        await services.close()
