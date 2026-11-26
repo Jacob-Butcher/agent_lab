@@ -1,6 +1,8 @@
 import asyncio
+import logging
 import os
 import re
+import shutil
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -11,6 +13,10 @@ from langchain_core.embeddings import Embeddings
 
 from agentlab.config import Settings
 from agentlab.models import Chunk, DocInfo
+from agentlab.parsing import ParseError, parse_document
+from agentlab.parsing.assemble import Asset, assemble
+from agentlab.parsing.base import sha256_bytes
+from agentlab.parsing.images import ImageOcr, build_ocr
 from agentlab.rag.corpus import load_doc, sha256_text
 from agentlab.rag.retriever import retrieve
 from agentlab.rag.splitter import split_markdown
@@ -18,6 +24,8 @@ from agentlab.rag.store import ChunkStore
 
 DOC_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 PREVIEW_CHARS = 200
+
+logger = logging.getLogger(__name__)
 
 
 class KbError(Exception):
@@ -39,7 +47,11 @@ class KBManager:
     """
 
     def __init__(
-        self, settings: Settings, store: ChunkStore, embeddings: Embeddings
+        self,
+        settings: Settings,
+        store: ChunkStore,
+        embeddings: Embeddings,
+        ocr: ImageOcr | None = None,
     ) -> None:
         self.settings = settings
         self.store = store
@@ -48,6 +60,7 @@ class KBManager:
         self.upload_dir = Path(settings.upload_dir)
         self.upload_dir.mkdir(parents=True, exist_ok=True)
         self._lock = asyncio.Lock()
+        self.ocr = build_ocr(settings) if ocr is None else ocr
 
     def _scan_dir(self, directory: Path) -> dict[str, Path]:
         result: dict[str, Path] = {}
@@ -92,6 +105,42 @@ class KBManager:
                 os.unlink(tmp)
             except FileNotFoundError:
                 pass
+
+    @staticmethod
+    def _write_bytes_atomic(path: Path, data: bytes) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(
+            dir=path.parent, prefix=f".{path.stem}.", suffix=".tmp"
+        )
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(data)
+            os.replace(tmp, path)
+        finally:
+            try:
+                os.unlink(tmp)
+            except FileNotFoundError:
+                pass
+
+    def _write_source(
+        self, doc_id: str, suffix: str, data: bytes, assets: list[Asset]
+    ) -> None:
+        self._remove_source_files(doc_id)
+        raw_dir = self.upload_dir / ".raw"
+        self._write_bytes_atomic(raw_dir / f"{doc_id}{suffix}", data)
+        asset_dir = self.upload_dir / ".assets" / doc_id
+        if assets:
+            asset_dir.mkdir(parents=True, exist_ok=True)
+            for asset in assets:
+                (asset_dir / asset.name).write_bytes(asset.data)
+
+    def _remove_source_files(self, doc_id: str) -> None:
+        raw_dir = self.upload_dir / ".raw"
+        if raw_dir.is_dir():
+            for path in raw_dir.iterdir():
+                if path.is_file() and path.stem == doc_id:
+                    path.unlink(missing_ok=True)
+        shutil.rmtree(self.upload_dir / ".assets" / doc_id, ignore_errors=True)
 
     def _upload_path(self, doc_id: str) -> Path:
         return self.upload_dir / f"{doc_id}.md"
@@ -159,11 +208,22 @@ class KBManager:
             "source": source,
         }
 
-    async def upload(self, filename: str, data: bytes, overwrite: bool = False) -> dict:
-        if not filename.lower().endswith(".md"):
-            raise KbError(400, "仅支持 .md 文件")
+    async def upload(
+        self,
+        filename: str,
+        data: bytes,
+        overwrite: bool = False,
+        doc_id: str | None = None,
+    ) -> dict:
         if len(data) > self.settings.max_upload_bytes:
             raise KbError(413, f"文件超过 {self.settings.max_upload_bytes} 字节限制")
+        if filename.lower().endswith(".md"):
+            return await self._upload_markdown(filename, data, overwrite)
+        return await self._upload_document(filename, data, overwrite, doc_id)
+
+    async def _upload_markdown(
+        self, filename: str, data: bytes, overwrite: bool
+    ) -> dict:
         try:
             text = data.decode("utf-8")
         except UnicodeDecodeError as exc:
@@ -197,8 +257,73 @@ class KBManager:
             vectors = await self._embed(chunks)
             self._write_atomic(self._upload_path(doc_id), frontmatter.dumps(post))
             self._remove_stale_upload(doc_id)
+            self._remove_source_files(doc_id)
             await self._save_index(doc_id, body, chunks, vectors)
-            return {"doc_id": doc_id, "title": title, "chunks": len(chunks), "source": "uploads"}
+            return {
+                "doc_id": doc_id,
+                "title": title,
+                "chunks": len(chunks),
+                "source": "uploads",
+                "format": "md",
+            }
+
+    async def _upload_document(
+        self,
+        filename: str,
+        data: bytes,
+        overwrite: bool,
+        doc_id_override: str | None,
+    ) -> dict:
+        if doc_id_override and not DOC_ID_PATTERN.match(doc_id_override):
+            raise KbError(400, "doc_id 不合法")
+        try:
+            kind, parsed = await asyncio.to_thread(
+                parse_document, filename, data, self.settings
+            )
+            assembled = await assemble(parsed, self.ocr, self.settings)
+        except ParseError as exc:
+            logger.warning("document parse failed: %s: %s", filename, exc.detail)
+            raise KbError(exc.status, exc.detail) from exc
+        except Exception as exc:
+            logger.warning("document parse failed: %s", filename, exc_info=True)
+            raise KbError(400, "文档解析失败") from exc
+
+        doc_id = doc_id_override or f"{kind}-{sha256_bytes(data)[:10]}"
+        if not DOC_ID_PATTERN.match(doc_id):
+            raise KbError(400, "doc_id 不合法")
+        title = parsed.title or Path(filename).stem
+        body = assembled.markdown
+        chunks = list(split_markdown(body, doc_id, title))
+        if not chunks:
+            raise KbError(400, "文档切块后为空")
+
+        post = frontmatter.Post(body)
+        post.metadata = {
+            "doc_id": doc_id,
+            "title": title,
+            "source_format": kind,
+            "source_file": Path(filename).name,
+        }
+        text = frontmatter.dumps(post)
+
+        async with self._lock:
+            existing = self._file_index().get(doc_id)
+            if existing and not overwrite:
+                raise KbError(409, f"doc_id 已存在：{doc_id}，是否覆盖？")
+            vectors = await self._embed(chunks)
+            self._write_atomic(self._upload_path(doc_id), text)
+            self._write_source(
+                doc_id, Path(filename).suffix.lower(), data, assembled.assets
+            )
+            self._remove_stale_upload(doc_id)
+            await self._save_index(doc_id, body, chunks, vectors)
+            return {
+                "doc_id": doc_id,
+                "title": title,
+                "chunks": len(chunks),
+                "source": "uploads",
+                "format": kind,
+            }
 
     async def save_body(self, doc_id: str, body: str) -> dict:
         if not DOC_ID_PATTERN.match(doc_id):
@@ -240,6 +365,7 @@ class KBManager:
                     chunks = list(doc.chunks)
                     vectors = await self._embed(chunks)
                     upload_path.unlink()
+                    self._remove_source_files(doc_id)
                     try:
                         await self.store.replace_doc(
                             doc.doc_id, doc.doc_hash, chunks, vectors
@@ -250,6 +376,7 @@ class KBManager:
                         ) from exc
                     return {"doc_id": doc_id, "result": "reverted_to_builtin"}
                 upload_path.unlink()
+                self._remove_source_files(doc_id)
                 try:
                     await self.store.delete_doc(doc_id)
                 except Exception as exc:

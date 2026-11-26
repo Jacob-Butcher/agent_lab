@@ -59,6 +59,7 @@ async def test_upload_indexes_and_lists(tmp_path):
         "title": "常见问题",
         "chunks": result["chunks"],
         "source": "uploads",
+        "format": "md",
     }
     assert result["chunks"] >= 1
     assert (uploads / "faq.md").exists()
