@@ -7,7 +7,7 @@ def test_compose_defines_expected_services():
     data = yaml.safe_load(Path("docker-compose.yml").read_text(encoding="utf-8"))
     services = data["services"]
     assert {"app", "db", "redis"} <= set(services)
-    assert services["app"]["ports"] == ["8080:8080"]
+    assert services["app"]["ports"] == ["8081:8080"]
     assert "pgvector" in services["db"]["image"]
     assert services["redis"]["image"].startswith("redis:")
     assert services["app"]["depends_on"]["db"]["condition"] == "service_healthy"
