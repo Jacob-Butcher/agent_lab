@@ -18,6 +18,7 @@ def test_dockerfile_runs_uvicorn_and_healthcheck():
     assert "uvicorn" in text
     assert "HEALTHCHECK" in text
     assert "8080" in text
+    assert "COPY static ./static" in text
 
 
 def test_env_example_contains_required_keys():
@@ -30,3 +31,8 @@ def test_env_example_contains_required_keys():
         "EMBEDDING_DIM",
     ):
         assert key in text
+
+
+def test_dockerignore_excludes_uploads():
+    text = Path(".dockerignore").read_text(encoding="utf-8")
+    assert "data/uploads/" in text

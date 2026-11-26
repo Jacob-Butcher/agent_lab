@@ -9,6 +9,7 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY src ./src
 COPY data ./data
 COPY demo ./demo
+COPY static ./static
 RUN uv sync --frozen --no-dev
 
 FROM python:3.12-slim
