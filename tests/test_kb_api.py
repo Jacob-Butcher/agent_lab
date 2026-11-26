@@ -316,3 +316,15 @@ async def test_upload_txt_with_optional_doc_id(tmp_path):
         assert response.json()["format"] == "txt"
     finally:
         await services.close()
+
+
+async def test_admin_page_supports_multi_format_upload(tmp_path):
+    app, services = await _make_app(tmp_path)
+    try:
+        async with _client(app) as client:
+            response = await client.get("/admin/kb")
+        assert 'accept=".md,.txt,.pdf,.docx,.pptx"' in response.text
+        assert 'id="doc-id"' in response.text
+        assert "≤50MB" in response.text
+    finally:
+        await services.close()
