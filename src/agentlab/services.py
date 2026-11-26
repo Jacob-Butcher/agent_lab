@@ -54,7 +54,7 @@ async def build_services(settings: Settings) -> Services:
     chat = build_chat_model(settings)
     embeddings = build_embeddings(settings)
 
-    if settings.is_mock:
+    if settings.is_mock or settings.store_backend == "memory":
         store: ChunkStore = InMemoryChunkStore()
         memory: SessionMemory = InMemorySessionMemory(
             max_messages=settings.max_history_messages

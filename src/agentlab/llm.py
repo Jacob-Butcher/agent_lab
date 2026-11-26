@@ -104,11 +104,13 @@ def build_embeddings(settings: Settings) -> Embeddings:
     settings.validate_runtime()
     if settings.is_mock:
         return HashEmbeddings(dim=settings.embedding_dim)
-    return OpenAIEmbeddings(
+    kwargs = dict(
         model=settings.embedding_model,
-        api_key=settings.dashscope_api_key,
-        base_url=settings.dashscope_base_url,
-        dimensions=settings.embedding_dim,
+        api_key=settings.resolved_embedding_api_key,
+        base_url=settings.resolved_embedding_base_url,
         chunk_size=settings.embed_batch_size,
         check_embedding_ctx_length=False,
     )
+    if settings.embedding_send_dimensions:
+        kwargs["dimensions"] = settings.embedding_dim
+    return OpenAIEmbeddings(**kwargs)

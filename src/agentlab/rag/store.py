@@ -180,15 +180,16 @@ class PGChunkStore:
         async with self.pool.connection() as conn:
             async with conn.transaction():
                 await conn.execute("DELETE FROM kb_chunks WHERE doc_id = %s", (doc_id,))
-                await conn.executemany(
-                    """
-                    INSERT INTO kb_chunks
-                      (doc_id, chunk_index, title, heading,
-                       content, metadata, embedding, content_hash)
-                    VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s::vector, %s)
-                    """,
-                    records,
-                )
+                async with conn.cursor() as cur:
+                    await cur.executemany(
+                        """
+                        INSERT INTO kb_chunks
+                          (doc_id, chunk_index, title, heading,
+                           content, metadata, embedding, content_hash)
+                        VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s::vector, %s)
+                        """,
+                        records,
+                    )
                 await conn.execute(
                     """
                     INSERT INTO ingest_state (doc_id, doc_hash) VALUES (%s, %s)

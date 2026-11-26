@@ -50,11 +50,27 @@
     const form = document.getElementById("form");
     const input = document.getElementById("input");
     const send = document.getElementById("send");
+    // crypto.randomUUID() 只在「安全上下文」里存在（HTTPS 或 localhost）。
+    // 用 http://<局域网IP>:8081 打开时它是 undefined，会在这里抛错，
+    // 后面所有事件监听都绑不上 —— 表现就是「点发送毫无反应」。
+    function makeSessionId() {
+      try {
+        if (window.crypto && typeof crypto.randomUUID === "function") {
+          return crypto.randomUUID();
+        }
+      } catch (e) { /* 继续走兜底 */ }
+      const rnd = () => Math.random().toString(36).slice(2, 10);
+      return "s" + Date.now().toString(36) + rnd() + rnd();
+    }
+
     let sessionId = localStorage.getItem("agentlab_session");
     if (!sessionId) {
-      sessionId = crypto.randomUUID();
-      localStorage.setItem("agentlab_session", sessionId);
+      sessionId = makeSessionId();
+      try { localStorage.setItem("agentlab_session", sessionId); } catch (e) { /* 隐私模式 */ }
     }
+    window.addEventListener("error", (e) => {
+      console.error("[agentlab] 前端异常:", e.message);
+    });
 
     function addMessage(role, text) {
       const el = document.createElement("div");

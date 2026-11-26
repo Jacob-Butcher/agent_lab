@@ -1,7 +1,10 @@
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
+# 可选：构建时指定 pypi 镜像，国内建议 build-arg UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+ARG UV_INDEX_URL=https://pypi.org/simple
+ENV UV_DEFAULT_INDEX=${UV_INDEX_URL}
 WORKDIR /app
-COPY pyproject.toml uv.lock ./
+COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-dev --no-install-project
 COPY src ./src
 COPY data ./data
