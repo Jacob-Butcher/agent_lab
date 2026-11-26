@@ -1,7 +1,7 @@
 import math
 from typing import Protocol
 
-from agentlab.models import Chunk, Retrieved
+from agentlab.models import Chunk, DocInfo, Retrieved
 from agentlab.rag.corpus import sha256_text
 
 
@@ -9,6 +9,7 @@ class ChunkStore(Protocol):
     async def migrate(self) -> None: ...
     async def validate_dim(self, dim: int) -> None: ...
     async def get_doc_hashes(self) -> dict[str, str]: ...
+    async def list_docs(self) -> list[DocInfo]: ...
     async def replace_doc(
         self, doc_id: str, doc_hash: str, chunks: list[Chunk], embeddings: list[list[float]]
     ) -> None: ...
@@ -52,6 +53,16 @@ class InMemoryChunkStore:
 
     async def get_doc_hashes(self) -> dict[str, str]:
         return dict(self._hashes)
+
+    async def list_docs(self) -> list[DocInfo]:
+        grouped: dict[str, dict[str, int | str]] = {}
+        for (doc_id, _), (chunk, _vector) in self._rows.items():
+            item = grouped.setdefault(doc_id, {"title": chunk.title, "chunks": 0})
+            item["chunks"] = int(item["chunks"]) + 1
+        return [
+            DocInfo(doc_id, str(data["title"]), int(data["chunks"]))
+            for doc_id, data in sorted(grouped.items())
+        ]
 
     async def replace_doc(
         self, doc_id: str, doc_hash: str, chunks: list[Chunk], embeddings: list[list[float]]
@@ -158,6 +169,19 @@ class PGChunkStore:
             cur = await conn.execute("SELECT doc_id, doc_hash FROM ingest_state")
             rows = await cur.fetchall()
         return {row[0]: row[1] for row in rows}
+
+    async def list_docs(self) -> list[DocInfo]:
+        async with self.pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                SELECT doc_id, MIN(title), COUNT(*)
+                FROM kb_chunks
+                GROUP BY doc_id
+                ORDER BY doc_id
+                """
+            )
+            rows = await cur.fetchall()
+        return [DocInfo(row[0], row[1], int(row[2])) for row in rows]
 
     async def replace_doc(
         self, doc_id: str, doc_hash: str, chunks: list[Chunk], embeddings: list[list[float]]

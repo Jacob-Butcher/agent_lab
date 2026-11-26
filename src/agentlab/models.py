@@ -27,6 +27,13 @@ class CorpusDoc:
 
 
 @dataclass(frozen=True)
+class DocInfo:
+    doc_id: str
+    title: str
+    chunks: int
+
+
+@dataclass(frozen=True)
 class Retrieved:
     doc_id: str
     chunk_index: int

@@ -52,3 +52,21 @@ def test_parse_vector_dim():
     assert parse_vector_dim("vector(64)") == 64
     with pytest.raises(ValueError):
         parse_vector_dim("text")
+
+
+async def test_list_docs():
+    store = InMemoryChunkStore()
+    assert await store.list_docs() == []
+
+    await store.replace_doc(
+        "d2", "h2", [Chunk("d2", 0, "发票规则", "关键规则", "发票内容")], [[1.0]]
+    )
+    await store.replace_doc(
+        "d1", "h1", [_chunk("d1", 0), _chunk("d1", 1)], [[1.0], [1.0]]
+    )
+
+    docs = await store.list_docs()
+    assert [(d.doc_id, d.title, d.chunks) for d in docs] == [
+        ("d1", "退款时效", 2),
+        ("d2", "发票规则", 1),
+    ]
