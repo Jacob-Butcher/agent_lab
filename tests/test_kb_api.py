@@ -26,7 +26,7 @@ async def _make_app(tmp_path, admin_token="test-token"):
         corpus_dir="data/corpus",
         upload_dir=str(tmp_path / "uploads"),
         admin_token=admin_token,
-        max_upload_bytes=1024,
+        max_upload_bytes=5 * 1024 * 1024,
     )
     services = await build_services(settings)
     return create_app(settings=settings, services=services), services
@@ -100,7 +100,13 @@ async def test_upload_rejects_oversized_file(tmp_path):
             response = await client.post(
                 "/api/kb/docs",
                 headers=HEADERS,
-                files={"file": ("big.md", b"x" * 2048, "text/markdown")},
+                files={
+                    "file": (
+                        "big.md",
+                        b"x" * (5 * 1024 * 1024 + 1),
+                        "text/markdown",
+                    )
+                },
             )
         assert response.status_code == 413
     finally:
@@ -208,7 +214,7 @@ async def test_upload_rejects_non_markdown(tmp_path):
             response = await client.post(
                 "/api/kb/docs",
                 headers=HEADERS,
-                files={"file": ("notes.txt", b"# hi\n", "text/plain")},
+                files={"file": ("notes.csv", b"a,b\n1,2\n", "text/csv")},
             )
         assert response.status_code == 400
     finally:
@@ -236,7 +242,7 @@ async def test_put_rejects_oversized_body(tmp_path):
     try:
         async with _client(app) as client:
             read = await client.get("/api/kb/docs/coupons", headers=HEADERS)
-            big = read.json()["body"] + "x" * 2048
+            big = read.json()["body"] + "x" * (5 * 1024 * 1024)
             response = await client.put(
                 "/api/kb/docs/coupons", headers=HEADERS, json={"body": big}
             )
@@ -266,5 +272,47 @@ async def test_admin_static_paths(tmp_path):
             assert static.status_code == 200
             missing = await client.get("/admin/nope")
             assert missing.status_code == 404
+    finally:
+        await services.close()
+
+
+async def test_upload_docx_returns_format(tmp_path):
+    from tests.docgen import make_docx
+
+    app, services = await _make_app(tmp_path)
+    try:
+        async with _client(app) as client:
+            response = await client.post(
+                "/api/kb/docs",
+                headers=HEADERS,
+                files={
+                    "file": (
+                        "refund.docx",
+                        make_docx(),
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    )
+                },
+            )
+        assert response.status_code == 201
+        payload = response.json()
+        assert payload["format"] == "docx"
+        assert payload["doc_id"].startswith("docx-")
+    finally:
+        await services.close()
+
+
+async def test_upload_txt_with_optional_doc_id(tmp_path):
+    app, services = await _make_app(tmp_path)
+    try:
+        async with _client(app) as client:
+            response = await client.post(
+                "/api/kb/docs",
+                headers=HEADERS,
+                data={"doc_id": "policy-txt"},
+                files={"file": ("policy.txt", "售后政策".encode(), "text/plain")},
+            )
+        assert response.status_code == 201
+        assert response.json()["doc_id"] == "policy-txt"
+        assert response.json()["format"] == "txt"
     finally:
         await services.close()

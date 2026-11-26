@@ -1,7 +1,15 @@
 import secrets
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    UploadFile,
+)
 from pydantic import BaseModel, Field
 
 from agentlab.kb import KbError, KBManager
@@ -52,11 +60,14 @@ def create_kb_router() -> APIRouter:
         kb: Admin,
         file: Annotated[UploadFile, File()],
         overwrite: bool = False,
+        doc_id: Annotated[str | None, Form()] = None,
     ):
         if not file.filename:
             raise KbError(400, "缺少文件名")
         data = await file.read(kb.settings.max_upload_bytes + 1)
-        return await kb.upload(file.filename, data, overwrite=overwrite)
+        return await kb.upload(
+            file.filename, data, overwrite=overwrite, doc_id=doc_id
+        )
 
     @router.put("/docs/{doc_id}")
     async def save_doc(doc_id: str, payload: SaveBody, kb: Admin):
