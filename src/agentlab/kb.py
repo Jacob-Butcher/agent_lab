@@ -12,6 +12,7 @@ from langchain_core.embeddings import Embeddings
 from agentlab.config import Settings
 from agentlab.models import Chunk, DocInfo
 from agentlab.rag.corpus import load_doc, sha256_text
+from agentlab.rag.retriever import retrieve
 from agentlab.rag.splitter import split_markdown
 from agentlab.rag.store import ChunkStore
 
@@ -255,3 +256,33 @@ class KBManager:
             if doc_id in corpus:
                 raise KbError(403, "内置文档由 git 管理；如需修改请先编辑生成覆盖版本")
             raise KbError(404, f"文档不存在：{doc_id}")
+
+    async def search(
+        self, query: str, top_k: int | None = None, threshold: float | None = None
+    ) -> dict:
+        query = query.strip()
+        if not query:
+            raise KbError(400, "检索问题不能为空")
+        k = max(1, min(20, top_k if top_k is not None else self.settings.rag_top_k))
+        th = threshold if threshold is not None else self.settings.rag_score_threshold
+        th = max(0.0, min(1.0, th))
+        try:
+            result = await retrieve(
+                query, self.embeddings, self.store, top_k=k, threshold=th
+            )
+        except Exception as exc:
+            raise KbError(502, "检索失败，请检查 embedding 配置或稍后重试") from exc
+        return {
+            "results": [
+                {
+                    "doc_id": row.doc_id,
+                    "chunk_index": row.chunk_index,
+                    "title": row.title,
+                    "heading": row.heading,
+                    "score": round(row.score, 4),
+                    "content": row.content[:PREVIEW_CHARS],
+                }
+                for row in result.chunks
+            ],
+            "effective": {"top_k": k, "threshold": th},
+        }

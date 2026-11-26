@@ -23,6 +23,11 @@ class ToggleEmbeddings(HashEmbeddings):
             raise RuntimeError("boom")
         return await super().aembed_documents(texts)
 
+    async def aembed_query(self, text):
+        if self.fail:
+            raise RuntimeError("boom")
+        return await super().aembed_query(text)
+
 
 def _manager(tmp_path, corpus_docs=None, embeddings=None):
     corpus = tmp_path / "corpus"
@@ -249,3 +254,52 @@ async def test_save_body_preserves_metadata(tmp_path):
     post = frontmatter.load(uploads / "faq.md")
     assert post.metadata["tags"] == ["a", "b"]
     assert post.metadata["doc_id"] == "faq"
+
+
+LONG_TEXT = "退款规则说明。" * 40
+LONG_DOC = f"---\ndoc_id: long\ntitle: 长文档\n---\n# 长文档\n\n{LONG_TEXT}\n"
+
+
+async def test_search_clamps_params(tmp_path):
+    kb, store, corpus, _uploads = _manager(tmp_path, {"builtin.md": DOC})
+    await ingest_corpus_dirs([corpus, kb.upload_dir], store, kb.embeddings)
+
+    result = await kb.search("退款", top_k=999, threshold=2)
+
+    assert result["effective"] == {"top_k": 20, "threshold": 1.0}
+
+
+async def test_search_returns_truncated_previews_ordered(tmp_path):
+    kb, store, corpus, _uploads = _manager(tmp_path, {"long.md": LONG_DOC})
+    await ingest_corpus_dirs([corpus, kb.upload_dir], store, kb.embeddings)
+
+    result = await kb.search("退款", top_k=5, threshold=0.0)
+
+    assert result["effective"] == {"top_k": 5, "threshold": 0.0}
+    assert result["results"]
+    row = result["results"][0]
+    assert len(row["content"]) == 200
+    assert row["doc_id"] == "long"
+    scores = [item["score"] for item in result["results"]]
+    assert scores == sorted(scores, reverse=True)
+
+
+async def test_search_failure_returns_502(tmp_path):
+    embeddings = ToggleEmbeddings()
+    kb, store, corpus, _uploads = _manager(
+        tmp_path, {"builtin.md": DOC}, embeddings=embeddings
+    )
+    await ingest_corpus_dirs([corpus, kb.upload_dir], store, kb.embeddings)
+
+    embeddings.fail = True
+    with pytest.raises(KbError) as exc:
+        await kb.search("退款")
+    assert exc.value.status == 502
+
+
+async def test_search_rejects_empty_query(tmp_path):
+    kb, *_ = _manager(tmp_path)
+
+    with pytest.raises(KbError) as exc:
+        await kb.search("   ")
+    assert exc.value.status == 400
