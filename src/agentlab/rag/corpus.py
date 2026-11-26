@@ -33,3 +33,21 @@ def load_corpus(directory: Path) -> list[CorpusDoc]:
             raise ValueError(f"duplicate doc_id: {doc.doc_id}")
         seen.add(doc.doc_id)
     return docs
+
+
+def load_corpus_dirs(directories: list[Path]) -> list[CorpusDoc]:
+    """Load several corpus directories; later directories win on duplicate doc_id.
+
+    Missing paths are skipped. A path that exists but is not a directory raises
+    ValueError. Ordering follows the first appearance of each doc_id, so an
+    override keeps the position of its first occurrence.
+    """
+    merged: dict[str, CorpusDoc] = {}
+    for directory in directories:
+        if not directory.exists():
+            continue
+        if not directory.is_dir():
+            raise ValueError(f"corpus path is not a directory: {directory}")
+        for doc in load_corpus(directory):
+            merged[doc.doc_id] = doc
+    return list(merged.values())
