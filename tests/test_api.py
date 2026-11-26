@@ -9,12 +9,13 @@ from agentlab.services import build_services
 
 
 @pytest.fixture
-async def app():
+async def app(tmp_path):
     settings = Settings(
         _env_file=None,
         model_provider="mock",
         memory_backend="memory",
         corpus_dir="data/corpus",
+        upload_dir=str(tmp_path / "uploads"),
     )
     services = await build_services(settings)
     application = create_app(settings=settings, services=services)

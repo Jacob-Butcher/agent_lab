@@ -1,6 +1,5 @@
 import asyncio
 from dataclasses import dataclass
-from pathlib import Path
 
 from langchain_core.embeddings import Embeddings
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -10,9 +9,10 @@ from redis.asyncio import Redis
 from agentlab.config import Settings
 from agentlab.graph.build import build_graph
 from agentlab.graph.nodes import make_nodes
+from agentlab.kb import KBManager
 from agentlab.llm import build_chat_model, build_embeddings
 from agentlab.memory import InMemorySessionMemory, RedisSessionMemory, SessionMemory
-from agentlab.rag.ingest import ingest_corpus
+from agentlab.rag.ingest import ingest_corpus_dirs
 from agentlab.rag.store import ChunkStore, InMemoryChunkStore, PGChunkStore
 
 
@@ -24,6 +24,7 @@ class Services:
     store: ChunkStore
     memory: SessionMemory
     graph: object
+    kb: KBManager
 
     async def close(self) -> None:
         await self.memory.close()
@@ -86,8 +87,16 @@ async def build_services(settings: Settings) -> Services:
         else:
             memory = InMemorySessionMemory(max_messages=settings.max_history_messages)
 
+    kb = KBManager(settings=settings, store=store, embeddings=embeddings)
     if settings.ingest_on_startup:
-        await ingest_corpus(Path(settings.corpus_dir), store, embeddings)
+        if not kb.corpus_dir.is_dir():
+            raise FileNotFoundError(f"corpus directory not found: {kb.corpus_dir}")
+        await ingest_corpus_dirs(
+            [kb.corpus_dir, kb.upload_dir],
+            store,
+            embeddings,
+            batch_size=settings.embed_batch_size,
+        )
 
     nodes = make_nodes(chat, embeddings, store, memory, settings)
     return Services(
@@ -97,4 +106,5 @@ async def build_services(settings: Settings) -> Services:
         store=store,
         memory=memory,
         graph=build_graph(nodes),
+        kb=kb,
     )
