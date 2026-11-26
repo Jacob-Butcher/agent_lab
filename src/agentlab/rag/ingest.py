@@ -3,7 +3,8 @@ from pathlib import Path
 
 from langchain_core.embeddings import Embeddings
 
-from agentlab.rag.corpus import load_corpus
+from agentlab.models import CorpusDoc
+from agentlab.rag.corpus import load_corpus, load_corpus_dirs
 from agentlab.rag.store import ChunkStore
 
 
@@ -16,14 +17,13 @@ class IngestStats:
     chunks: int = 0
 
 
-async def ingest_corpus(
-    corpus_dir: Path,
+async def ingest_docs(
+    docs: list[CorpusDoc],
     store: ChunkStore,
     embeddings: Embeddings,
     batch_size: int = 10,
     reset: bool = False,
 ) -> IngestStats:
-    docs = load_corpus(corpus_dir)
     existing = {} if reset else await store.get_doc_hashes()
     stats = IngestStats()
 
@@ -54,3 +54,31 @@ async def ingest_corpus(
         stats.deleted += 1
 
     return stats
+
+
+async def ingest_corpus(
+    corpus_dir: Path,
+    store: ChunkStore,
+    embeddings: Embeddings,
+    batch_size: int = 10,
+    reset: bool = False,
+) -> IngestStats:
+    return await ingest_docs(
+        load_corpus(corpus_dir), store, embeddings, batch_size=batch_size, reset=reset
+    )
+
+
+async def ingest_corpus_dirs(
+    directories: list[Path],
+    store: ChunkStore,
+    embeddings: Embeddings,
+    batch_size: int = 10,
+    reset: bool = False,
+) -> IngestStats:
+    return await ingest_docs(
+        load_corpus_dirs(directories),
+        store,
+        embeddings,
+        batch_size=batch_size,
+        reset=reset,
+    )
