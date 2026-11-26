@@ -8,7 +8,16 @@ from pptx.util import Inches as PptxInches
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Table, TableStyle
+from reportlab.platypus import (
+    Image as ReportLabImage,
+)
+from reportlab.platypus import (
+    PageBreak,
+    Paragraph,
+    SimpleDocTemplate,
+    Table,
+    TableStyle,
+)
 
 
 def png_bytes(width: int = 200, height: int = 100, color=(200, 30, 30)) -> bytes:
@@ -56,9 +65,9 @@ def make_pptx() -> bytes:
     return buffer.getvalue()
 
 
-def make_pdf() -> bytes:
+def make_pdf(title: str | None = None) -> bytes:
     buffer = io.BytesIO()
-    document = SimpleDocTemplate(buffer, pagesize=letter)
+    document = SimpleDocTemplate(buffer, pagesize=letter, title=title)
     styles = getSampleStyleSheet()
     table = Table([["Type", "Window"], ["No reason", "7 days"]])
     table.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 1, colors.black)]))
@@ -69,5 +78,14 @@ def make_pdf() -> bytes:
             PageBreak(),
             Paragraph("Second page text", styles["Normal"]),
         ]
+    )
+    return buffer.getvalue()
+
+
+def make_image_only_pdf() -> bytes:
+    buffer = io.BytesIO()
+    document = SimpleDocTemplate(buffer, pagesize=letter)
+    document.build(
+        [ReportLabImage(io.BytesIO(png_bytes()), width=200, height=100)]
     )
     return buffer.getvalue()
