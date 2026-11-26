@@ -36,4 +36,25 @@ def test_kb_defaults():
     s = _settings()
     assert s.upload_dir == "data/uploads"
     assert s.admin_token == ""
-    assert s.max_upload_bytes == 2 * 1024 * 1024
+    assert s.max_upload_bytes == 50 * 1024 * 1024
+
+
+def test_document_parsing_defaults():
+    s = _settings()
+    assert s.max_doc_pages == 100
+    assert s.max_doc_chars == 2_000_000
+    assert s.image_ocr_enabled is True
+    assert s.ocr_model == "qwen-vl-ocr"
+    assert s.max_zip_uncompressed == 200 * 1024 * 1024
+    assert s.max_zip_entries == 5000
+
+
+def test_settings_env_override(monkeypatch):
+    monkeypatch.setenv("MAX_DOC_PAGES", "7")
+    s = Settings(_env_file=None)
+    assert s.max_doc_pages == 7
+
+
+def test_invalid_parsing_limits_rejected():
+    with pytest.raises(ValueError, match="MAX_DOC_PAGES"):
+        _settings(model_provider="mock", max_doc_pages=0).validate_runtime()

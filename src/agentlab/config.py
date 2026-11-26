@@ -36,7 +36,13 @@ class Settings(BaseSettings):
     corpus_dir: str = "data/corpus"
     upload_dir: str = "data/uploads"
     admin_token: str = ""
-    max_upload_bytes: int = 2 * 1024 * 1024
+    max_upload_bytes: int = 50 * 1024 * 1024
+    max_doc_pages: int = 100
+    max_doc_chars: int = 2_000_000
+    image_ocr_enabled: bool = True
+    ocr_model: str = "qwen-vl-ocr"
+    max_zip_uncompressed: int = 200 * 1024 * 1024
+    max_zip_entries: int = 5000
     demo_dir: str = "demo"
 
     max_message_chars: int = 2000
@@ -63,6 +69,14 @@ class Settings(BaseSettings):
             raise ValueError("EMBEDDING_API_KEY is required when EMBEDDING_BASE_URL is set")
         if self.max_history_messages <= 0:
             raise ValueError("MAX_HISTORY_MESSAGES must be positive")
+        if self.max_upload_bytes <= 0:
+            raise ValueError("MAX_UPLOAD_BYTES must be positive")
+        if self.max_doc_pages <= 0:
+            raise ValueError("MAX_DOC_PAGES must be positive")
+        if self.max_doc_chars <= 0:
+            raise ValueError("MAX_DOC_CHARS must be positive")
+        if self.max_zip_uncompressed <= 0 or self.max_zip_entries <= 0:
+            raise ValueError("MAX_ZIP_UNCOMPRESSED / MAX_ZIP_ENTRIES must be positive")
 
 
 @lru_cache

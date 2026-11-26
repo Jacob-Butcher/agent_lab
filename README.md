@@ -73,7 +73,7 @@ Linux 服务器需在上线前保证 `data/uploads/` 对容器用户（UID 10001
 SELinux 主机还需为 bind mount 加 `:z`（如 `./data/uploads:/app/data/uploads:z`）。
 
 > 安全提示：未配置 HTTPS 时 Token 可能被网络嗅探；建议用 Caddy/Nginx 反代并启用 TLS。
-> 同时建议在反代层限制请求体大小（如 `client_max_body_size 3m`），因为上传接口在鉴权前会先解析 multipart 请求体。
+> 同时建议在反代层限制请求体大小（如 `client_max_body_size 60m`），因为上传接口在鉴权前会先解析 multipart 请求体。
 
 ## 配置说明
 
@@ -88,7 +88,7 @@ SELinux 主机还需为 bind mount 加 `:z`（如 `./data/uploads:/app/data/uplo
 | `MAX_HISTORY_MESSAGES` | 传给模型的最近消息数 |
 | `ADMIN_TOKEN` | 知识库管理页令牌，留空则禁用管理接口（503） |
 | `UPLOAD_DIR` | 上传文档目录（自带 compose 下须为 `data/uploads`） |
-| `MAX_UPLOAD_BYTES` | 单次上传/编辑的最大字节数，默认 2 MiB |
+| `MAX_UPLOAD_BYTES` | 单次上传/编辑的最大字节数，默认 50MB |
 
 ## 验收清单（服务器）
 
