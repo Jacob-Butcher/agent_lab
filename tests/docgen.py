@@ -27,10 +27,13 @@ def png_bytes(width: int = 200, height: int = 100, color=(200, 30, 30)) -> bytes
     return buffer.getvalue()
 
 
-def make_docx() -> bytes:
+def make_docx(title: str | None = None) -> bytes:
     document = Document()
+    if title:
+        document.core_properties.title = title
     document.add_heading("退款政策", level=1)
     document.add_paragraph("订单签收后 7 天内可申请无理由退货。")
+    document.add_paragraph("列表项", style="List Bullet")
     table = document.add_table(rows=2, cols=2)
     table.cell(0, 0).text = "类型"
     table.cell(0, 1).text = "时效"
@@ -39,6 +42,12 @@ def make_docx() -> bytes:
     document.add_picture(io.BytesIO(png_bytes()), width=Inches(2))
     buffer = io.BytesIO()
     document.save(buffer)
+    return buffer.getvalue()
+
+
+def make_empty_docx() -> bytes:
+    buffer = io.BytesIO()
+    Document().save(buffer)
     return buffer.getvalue()
 
 
