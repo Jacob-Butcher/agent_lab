@@ -206,6 +206,8 @@ class KBManager:
         body = body.strip()
         if not body:
             raise KbError(400, "正文不能为空")
+        if len(body.encode("utf-8")) > self.settings.max_upload_bytes:
+            raise KbError(413, f"文件超过 {self.settings.max_upload_bytes} 字节限制")
 
         async with self._lock:
             entry = self._file_index().get(doc_id)

@@ -6,7 +6,9 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from agentlab.api.chat import create_router
+from agentlab.api.kb import create_kb_router
 from agentlab.config import Settings, get_settings
+from agentlab.kb import KbError
 from agentlab.services import Services, build_services
 
 
@@ -24,12 +26,18 @@ async def lifespan(app: FastAPI):
             await app.state.services.close()
 
 
+async def _kb_error_handler(request: Request, exc: KbError) -> JSONResponse:
+    return JSONResponse({"detail": exc.detail}, status_code=exc.status)
+
+
 def create_app(settings: Settings | None = None, services: Services | None = None) -> FastAPI:
     settings = settings or get_settings()
     app = FastAPI(title="Agent Lab 智能客服", lifespan=lifespan)
     app.state.settings = settings
     app.state.services = services
     app.include_router(create_router())
+    app.include_router(create_kb_router())
+    app.add_exception_handler(KbError, _kb_error_handler)
 
     @app.get("/health")
     async def health():
